@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Biotech Paper Puller</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 2rem 1rem;
+        background: #f6f7fb;
+        color: #111827;
+      }
+      .container {
+        max-width: 760px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(31, 41, 55, 0.08);
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.6rem;
+      }
+      .subtext {
+        color: #374151;
+        margin-bottom: 1.2rem;
+      }
+      label {
+        display: block;
+        margin: 0.8rem 0 0.35rem;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 0.75rem;
+        border: 1px solid #c8cdd7;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border: none;
+        border-radius: 8px;
+        background: #1f6feb;
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: #a8b5ca;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        border-radius: 8px;
+        background: #eef3ff;
+        color: #1f3b73;
+      }
+      .result {
+        margin-top: 1rem;
+        border: 1px solid #d9e1ef;
+        border-radius: 8px;
+        padding: 1rem;
+      }
+      .row {
+        margin-bottom: 0.45rem;
+      }
+      .download-link {
+        display: inline-block;
+        margin-top: 0.75rem;
+        padding: 0.6rem 0.85rem;
+        background: #157347;
+        color: #fff;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 700;
+      }
+      .warning {
+        margin-top: 0.5rem;
+        color: #8a5700;
+      }
+      .footnote {
+        margin-top: 1.4rem;
+        font-size: 0.9rem;
+        color: #5b6576;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <h1>Biotech Paper Puller</h1>
+      <p class="subtext">
+        Paste the full paper title and first-author last name to locate a legal full-text source.
+      </p>
+
+      <form id="lookup-form">
+        <label for="title">Research paper title</label>
+        <input
+          id="title"
+          name="title"
+          type="text"
+          required
+          minlength="5"
+          placeholder="Full publication title"
+        />
+
+        <label for="author">First author last name</label>
+        <input
+          id="author"
+          name="author"
+          type="text"
+          required
+          minlength="2"
+          placeholder="Example: Smith"
+        />
+
+        <button id="submit-btn" type="submit">Find paper</button>
+      </form>
+
+      <div id="status" class="status" hidden></div>
+      <section id="result" class="result" hidden></section>
+
+      <p class="footnote">
+        This tool only surfaces available legal/open-access copies and does not bypass publisher
+        access controls.
+      </p>
+    </main>
+
+    <script>
+      const form = document.getElementById("lookup-form");
+      const submitBtn = document.getElementById("submit-btn");
+      const statusBox = document.getElementById("status");
+      const resultBox = document.getElementById("result");
+
+      function setStatus(message, visible = true) {
+        statusBox.hidden = !visible;
+        statusBox.textContent = message;
+      }
+
+      function renderResult(payload) {
+        const match = payload.match || {};
+        const warnings = payload.warnings || [];
+        const candidates = payload.candidate_urls || [];
+
+        const rows = [
+          `<div class="row"><strong>Matched title:</strong> ${match.title || "Unknown"}</div>`,
+          `<div class="row"><strong>Source:</strong> ${match.source || "Unknown"}</div>`,
+          `<div class="row"><strong>DOI:</strong> ${match.doi || "Unavailable"}</div>`,
+          `<div class="row"><strong>Year:</strong> ${match.year || "Unavailable"}</div>`,
+          `<div class="row"><strong>Confidence score:</strong> ${
+            match.score !== undefined ? match.score : "n/a"
+          }</div>`,
+        ];
+
+        if (payload.download_available && payload.download && payload.download.endpoint) {
+          rows.push(
+            `<a class="download-link" href="${payload.download.endpoint}">Download paper</a>`
+          );
+        } else {
+          rows.push(
+            `<div class="row"><strong>Download:</strong> No legal full-text URL was found.</div>`
+          );
+        }
+
+        if (candidates.length > 1) {
+          rows.push(`<div class="row"><strong>Extra candidate URLs:</strong> ${candidates.length - 1}</div>`);
+        }
+
+        if (warnings.length) {
+          rows.push(
+            `<div class="warning"><strong>Note:</strong> ${warnings.map((w) => `<div>${w}</div>`).join("")}</div>`
+          );
+        }
+
+        resultBox.innerHTML = rows.join("");
+        resultBox.hidden = false;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        resultBox.hidden = true;
+        setStatus("Searching legal access sources...");
+        submitBtn.disabled = true;
+
+        const payload = {
+          title: document.getElementById("title").value.trim(),
+          first_author_last_name: document.getElementById("author").value.trim(),
+        };
+
+        try {
+          const response = await fetch("/api/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            throw new Error(errorPayload.detail || "No match found");
+          }
+
+          const data = await response.json();
+          renderResult(data);
+          setStatus("Search complete.");
+        } catch (error) {
+          setStatus(`Unable to find a legal full-text source: ${error.message}`);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
